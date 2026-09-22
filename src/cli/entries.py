@@ -28,7 +28,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="pandoc")
 logger = logging.getLogger("transformo")
 
 
-def set_logging_level(verbosity: int) -> None:
+def set_logging_level(ctx, param, verbosity: int) -> None:
     """Set the logging level"""
     logger.setLevel(logging.ERROR)
     if verbosity:
@@ -38,6 +38,7 @@ def set_logging_level(verbosity: int) -> None:
             logger.setLevel(logging.INFO)
         if verbosity >= 3:
             logger.setLevel(logging.DEBUG)
+    return verbosity
 
 
 @click.command()
@@ -47,6 +48,7 @@ def set_logging_level(verbosity: int) -> None:
     "-v",
     "--verbose",
     "verbosity",
+    callback=set_logging_level,
     count=True,
     help="Be verbose. Add multiple times to increase verbosity.",
 )
@@ -100,8 +102,6 @@ def main(  # pylint: disable=too-many-arguments
 
     This application is under development and can be expected to change in the future.
     """
-    set_logging_level(verbosity)
-
     with open(configuration_file, "r", encoding="utf-8") as yaml:
         try:
             pipeline = Pipeline.from_yaml(yaml.read())

@@ -55,7 +55,7 @@ async def _execute(command, *argument):
 def run_command(command: str):
     """Run a command.
 
-    Stdout and stderr utput of command is logged at WARNING and ERROR
+    Stdout and stderr output of command is logged at WARNING and ERROR
     levels respectively.
     """
     cmd = command.split()
