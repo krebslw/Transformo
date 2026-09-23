@@ -1,0 +1,45 @@
+# Showcase geoid fitting without pre- and postprocessing.
+#
+# The typical geoid fitting scenario is this:
+#
+# For some set of points, we use a gravimetric geoid as a "source",
+# and observed geoid undulations from a GNSS/levelling data set is
+# used as "target".
+#
+# Goal is to find some corrector surface that can be added to "source" in order to predict
+# "target". This is done with an operator that predicts the "kriging weights". (in the same way
+# that Helmert-operators predict Helmert-parameters.)
+# The kriging weights can then be used to evaluate the corrector surface anywhere.
+#
+# In practice, source is usually given as a geotiff, and we also want the
+# output corrector surface given as a geotiff, sampled at the same locations
+# as the source geotiff.
+#
+# Thus we use transformo's pre-processing to sample the geotiff at the target locations.
+# And we use post-processing of the kriging weights, to generate a new geotiff using
+# the same grid as the input geotiff.
+
+source_data:
+- name: "Gravgeoid sampled at target locations"
+  type: csv
+  filename: test/data/gravgeoid.csv
+
+target_data:
+- name: Observed geoid undulations from gnss/levelling
+  type: csv
+  filename: test/data/gnsslev.csv
+
+operators:
+- name: Trend estimation, to ensure stationarity before kriging. can use a bias or linear.
+        (Or polynomial or something even fancier.)
+  type: helmert_3param
+
+- name: Compute kriging weights after subtraction of trend surface.
+  type: geoidfit
+
+presenters:
+- name: PROJ string
+  type: proj_presenter
+- name: ENU Residuals
+  type: topocentricresidual_presenter
+  coordinate_type: cartesian
