@@ -17,7 +17,6 @@ from transformo.datatypes import Parameter
 def _pairwise_euclidean_distances(*args: np.ndarray) -> np.ndarray:
     """Compute distances between all points"""
     coords = np.vstack([*args]).T
-    breakpoint()
     diffs = coords[:, None, :] - coords[None, :, :]
     d = np.sqrt((diffs**2).sum(-1))
     return d
