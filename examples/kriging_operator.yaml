@@ -1,0 +1,39 @@
+# Demonstrate the use of the kriging operator for fitting a geoid model to gnss levelling data
+
+source_data:
+# - name: some source data that are not used for anything!
+#   type: csv
+#   filename: test/data/dk_cors_itrf2014.csv
+
+- name: gnsslevellingdata
+  type: csv
+  filename: test/data/kriging_data/dk_gnsslev.csv
+  columns: [station, z, skip, skip, y, x, skip, skip, t]
+
+target_data:
+- name: some target data that are not used for anything!
+  type: csv
+  filename: test/data/dk_cors_etrs89.csv
+
+operators:
+- name: Kriging operator that demonstrates how the a geoid model can be fitted to GNSS levelling data
+  type: geoidfit
+
+
+  gnsslev_data: ./test/data/kriging_data/dk_gnsslev.csv
+  gravsoft_data: ./test/data/kriging_data/143_isl_rettelser_v01_with_column_labels.n
+
+  geotiffin: ./test/data/kriging_data/gravgeoid2023.tif
+  geotiffout: ./examples/kriging_operator_outdir/fitted_geoid.tif
+
+  # the kriging operator uses the same params as gravsoft!
+  # alpha = 0.595 * xhalf
+  alpha: 35000 # approx 60 km
+  stddev_minimum: 0.005
+  grid_extent: 53.5000 58.00 7.0000 17.000020  0.010 0.0166667
+
+  outdir: examples/kriging_operator_outdir/
+
+presenters:
+- type: dummy_presenter
+  name: The kriging operator has nothing to present!
