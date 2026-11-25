@@ -20,6 +20,7 @@ from .helmert import (
 from .proj import ProjOperator
 from .gravsoft_wrapper import GravsoftOperator
 from .kriging import KrigingOperator
+from .geoidfit import GeoidfitOperator
 
 __all__ = [
     "Operator",
@@ -30,7 +31,8 @@ __all__ = [
     "RotationConvention",
     "ProjOperator",
     "GravsoftOperator",
-    "kriging",
+    "KrigingOperator",
+    "GeoidfitOperator",
 ]
 
 
