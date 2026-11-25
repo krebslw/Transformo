@@ -148,7 +148,7 @@ class CsvDataSource(DataSource):
         self._skip_counter = 0
 
         with open(self.filename, encoding="utf-8") as csvfile:
-            has_header = csv.Sniffer().has_header(csvfile.read(1024))
+            has_header = csv.Sniffer().has_header(csvfile.read(2048))
             csvfile.seek(0)  # reset file handle
 
             columns = [self._enumerate_skip(c.value) for c in self.columns]
