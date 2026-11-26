@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import enum
 from typing import Literal, Optional, Union
+from pathlib import Path
 
 import numpy as np
 from pyproj import Transformer
@@ -70,8 +71,8 @@ def _get_prediction_points(geotiff: str):
 
 
 def _pairwise_euclidean_distances(
-        geogr1: tuple[np.ndarray],
-        geogr2: tuple[np.ndarray] = None,
+        X_geogr: tuple[np.ndarray],
+        Y_geogr: tuple[np.ndarray] = None,
     ) -> np.ndarray:
     """
     Compute euclidean distances between points given in geographic coordinates
@@ -83,16 +84,16 @@ def _pairwise_euclidean_distances(
     `geogr1` and `geogr2` can have different number of points and if `geogr2` is not
     given, the distances between all points in `geogr1` are then computed.
     """
-    if geogr2 is None:
-        geogr2 = geogr1
+    if Y_geogr is None:
+        Y_geogr = X_geogr
 
-    xyz1 = _transform_geogr_2_geocentr(*geogr1)
-    xyz2 = _transform_geogr_2_geocentr(*geogr2)
+    X_geocentr = _transform_geogr_2_geocentr(*X_geogr)
+    Y_geocentr = _transform_geogr_2_geocentr(*Y_geogr)
 
-    xyz1 = np.vstack([*xyz1]).T
-    xyz2 = np.vstack([*xyz2]).T
+    X_geocentr = np.vstack([*X_geocentr]).T
+    Y_geocentr = np.vstack([*Y_geocentr]).T
 
-    coordinate_diffs = xyz1[:, None, :] - xyz2[None, :, :]
+    coordinate_diffs = X_geocentr[:, None, :] - Y_geocentr[None, :, :]
     distances = np.sqrt((coordinate_diffs**2).sum(-1))
     return distances
 
@@ -115,7 +116,7 @@ def _covariance_function(distances: np.ndarray, c0: float, alpha: float = None) 
     """
     Compute covariance between points, given their pairwise-distances
 
-    A function of the form:
+    A "2nd order Markov" function of the form:
 
         c(s) = c0 * (1 + s/alpha) * exp(-s/alpha)
 
@@ -123,7 +124,7 @@ def _covariance_function(distances: np.ndarray, c0: float, alpha: float = None) 
     and alpha is the range-parameter, i.e. the characteristic spatial scale of features.
 
     We have approximately that alpha = 0.595*xhalf, where xhalf is the "halving distance" of the covariance
-    function
+    function.
     """
 
     # ensure alpha > 0
@@ -183,12 +184,11 @@ class GeoidfitOperator(Operator):
 
     def invert_covariance_matrix(
         self,
-        x: np.ndarray,
-        y: np.ndarray,
+        distances: np.ndarray,
         residuals: np.ndarray,
         obs_var: Optional[Union[float, list, np.ndarray]] = None,
     ):
-        n = len(x)
+        n = len(distances)
         c0_min = self.stddev_minimum**2
 
         if obs_var is None:
@@ -206,9 +206,6 @@ class GeoidfitOperator(Operator):
         c0 = float(np.var(residuals, ddof=1))
         c0 = max(c0, c0_min)
         self.c0 = c0
-        print(c0)
-
-        distances = _pairwise_euclidean_distances(geogr1=(x, y))
 
         # Kovariansfunktion
         cov_process_dd = _covariance_function(distances, c0, self.alpha)
@@ -228,37 +225,6 @@ class GeoidfitOperator(Operator):
         inv_cov_xx = np.linalg.inv(K)
 
         return inv_cov_xx
-
-
-    def _compute_weights(self, x, y, px, py, inv_cov_xx: np.ndarray):
-        """
-        Compute kriging weights
-
-        Using the input points X and the output (prediction) points Y:
-
-            X = [[lon_i, lat_i]] for i in 1 .. N
-            Y = [[lon_j, lat_j]] for j in 1 .. M
-
-        the covariance matrix between X and Y is computed. The already
-
-        Uses the already inverted covariance matrix "inv(Cₓₓ)" of observations,
-
-        and simply multiplies
-        the relevant matrices together
-
-        """
-        n = len(x)
-        m = len(px)
-
-        distances = _pairwise_euclidean_distances(geogr1=(x, y), geogr2=(px, py))
-        cov_xy = _covariance_function(distances, self.c0, self.alpha)
-
-        RHS = np.vstack([cov_xy, np.ones((1, m))])
-
-        sol = inv_cov_xx@RHS
-        weights = sol[:n, :]
-
-        return weights
 
     def read_the_data(self) -> tuple[DataSource, DataSource]:
         koter = CsvDataSource(
@@ -333,31 +299,7 @@ class GeoidfitOperator(Operator):
         target_weights: CoordinateMatrix,
     ) -> None:
         """
-        Estimate kriging weights.
-
-        Parameter `kriging_weights` of this operator *will* be overwritten once
-        this method is called.
-
-        Source coordinates antages på formen x,y,z hvor x,y = lat,lon og z="residuals", dvs
-        (Nobs-Ngrav)-estimated_trend.
-
-        Target coordinates er (lat,lon,Nobs).
-
-        Men denne operator har ikke kendskab til Ngrav eller estimated_bias". Så vi finder bare
-        den overflade som kan reduceres residuals til 0.
-
-        coordinate_matrix = [[x1, y1, z1, t1], [x2, y2, z2, t2], ...]
-
-        Ordinary kriging med eksplicit kovariansfunktion.
-
-        obs_var er a priori variansen på den observerede geoide Nobs
-
-        Parametre (nye relevante):
-        - transform_coords: hvis True transformeres x_list/y_list og predict_x/predict_y
-                            fra input_crs til target_crs vha. pyproj. Default True.
-        - input_crs, target_crs: CRS strings, fx "EPSG:4326" -> "EPSG:25832".
-
-        Øvrige parametre som tidligere (z_list, alpha, nugget, obs_var, ...).
+        Estimate the fitted geoid to gnss-levelling data
         """
         # geoid_obs, geoid_grav = self.read_the_data()
 
@@ -367,8 +309,8 @@ class GeoidfitOperator(Operator):
         geoid_grav_coords = self.sample_tif(geoid_obs.coordinate_matrix)
         geoid_grav = geoid_obs.update_coordinates(geoid_grav_coords)
 
-        x = geoid_obs.coordinate_matrix[:, 0]
-        y = geoid_obs.coordinate_matrix[:, 1]
+        lon = geoid_obs.coordinate_matrix[:, 0]
+        lat = geoid_obs.coordinate_matrix[:, 1]
 
         source_z = geoid_grav.coordinate_matrix[:,2]
         target_z = geoid_obs.coordinate_matrix[:, 2]
@@ -376,39 +318,85 @@ class GeoidfitOperator(Operator):
         # it is this residual surface between the observed geoid and the gravimetric geoid
         # that we are trying to model!
         residuals = target_z-source_z
-        # self.residual_surface_at_gnsslev = residuals
 
-        # Compute and invert covariance matrix (Cxx), and set self.invCxx
+        # Compute and invert covariance matrix (Cxx), to get inv(Cxx)
+        self_distances = _pairwise_euclidean_distances(X_geogr=(lon, lat))
         inv_cov_xx = self.invert_covariance_matrix(
-            x,
-            y,
+            self_distances,
             residuals,
             obs_var=0.005**2,
         )
 
         # read gravgeoid geotiff to get a list of all the grid points
         # these are used as prediction points for the kriging
-        px, py =_get_prediction_points(self.geotiffin)
+        p_lon, p_lat =_get_prediction_points(self.geotiffin)
 
-        weights = self._compute_weights(x, y, px, py, inv_cov_xx)
+        # compute covariance matrix between all input points X (gnsslev) and the gridded
+        # prediction points Y
+        distances = _pairwise_euclidean_distances(X_geogr=(lon, lat), Y_geogr=(p_lon, p_lat))
+        cov_xy = _covariance_function(distances, self.c0, self.alpha)
 
+        # Construct the "right hand side" of the equation -- a matrix corresponding
+        # to Cov_xy and 1's in the last row
+        # [C(1,1), C(1,2), ..., C(1,M)]
+        # [C(2,1), C(2,2), ..., C(2,M)]
+        # [   ...,    ..., ...,    ...]
+        # [C(N,1), C(N,2), ..., C(N,M)]
+        # [   1  ,    1  , ...,   1   ]
+        n = len(lon)
+        m = len(p_lon)
+
+        RHS = np.vstack([cov_xy, np.ones((1, m))])
+
+        sol = inv_cov_xx@RHS
+
+        weights = sol[:n, :]
+        mu = sol[-1, :]
+
+        # Compute predictions and their estimated variances
         Zhat_flat = residuals[None, :] @ weights
+
+        # Kriging-varians (proces-varians): c0 - c^T w + mu
+        cTw = np.einsum("im,im->m", cov_xy, weights)
+        sigma2 = self.c0 - cTw + mu
+        sigma2 = np.maximum(sigma2, 0.0)
 
         # Write output raster, using metadata from input raster
         metadata = _read_geotiff_metadata(self.geotiffin)
+        self.geotiffout = Path(self.geotiffout)
+        error_grid_filename = self.geotiffout.with_stem(self.geotiffout.stem+"_errors")
+
         _write_geotiff(self.geotiffout, data_flat=Zhat_flat, metadata=metadata)
+        _write_geotiff(error_grid_filename, data_flat=sigma2, metadata=metadata)
+        breakpoint()
+        # Now we do all the same as above! But do it for the same points as the input points
+        # i.e. p_lon, p_lat = lon, lat
+        # mu, weights = self._compute_weights(lon, lat, lon, lat, inv_cov_xx)
 
-        # Now we compute the fitted geoid in the same points as source
-        # i.e. px,py = x,y
-        weights = self._compute_weights(x, y, x, y, inv_cov_xx)
+        cov_xy = _covariance_function(self_distances, self.c0, self.alpha)
 
+        n = len(lon)
+        m = len(lon)
+
+        RHS = np.vstack([cov_xy, np.ones((1, m))])
+
+        sol = inv_cov_xx@RHS
+
+        weights = sol[:n, :]
+        mu = sol[-1, :]
+
+        # Compute predictions and their estimated variances
         deltaN_flat = residuals[None, :] @ weights
 
-        # TODO: her kunne vi også beregne kriging variansen således
         # Kriging-varians (proces-varians): c0 - c^T w + mu
-        # cTw = np.einsum("im,im->m", cov_xy, weights)
-        # sigma2 = c0 - cTw + mu
-        # sigma2 = np.maximum(sigma2, 0.0)
+        cTw = np.einsum("im,im->m", cov_xy, weights)
+        sigma2 = self.c0 - cTw + mu
+        sigma2 = np.maximum(sigma2, 0.0)
+
+
+        # TODO: Save deltaN_flat and sigma2! these are the predictions of the geoid in the
+        # fitting points. Subtract deltaN_flat from observed geoid in source points "geoid_obs"
+        # get the "residuals" i.e. the main way we quantify the fitting!
 
         return
 
